@@ -39,12 +39,12 @@ where
     }
 }
 
-struct Dataflow {
+pub struct Dataflow {
     operators: Vec<Box<dyn FnMut()>>,
     schedule: Rc<RefCell<Schedule<usize>>>,
 }
 
-struct RecvCtx<T> {
+pub struct RecvCtx<T> {
     inputs: Rc<RefCell<VecDeque<T>>>,
 }
 
@@ -56,7 +56,7 @@ impl<T> RecvCtx<T> {
     }
 }
 
-struct SendCtx<O>
+pub struct SendCtx<O>
 where
     O: Clone,
 {
@@ -64,7 +64,7 @@ where
 }
 
 impl<I> RecvCtx<I> {
-    fn pull(&self) -> Option<I> {
+    pub fn pull(&self) -> Option<I> {
         (*self.inputs).borrow_mut().pop_front()
     }
 }
@@ -73,7 +73,7 @@ impl<O> SendCtx<O>
 where
     O: Clone,
 {
-    fn push(&self, o: O) {
+    pub fn push(&self, o: O) {
         for (id, sub) in &*(*self.output_port.subscribers).borrow() {
             self.output_port.schedule.borrow_mut().insert(*id);
             sub.push(o.clone())
@@ -81,7 +81,7 @@ where
     }
 }
 
-struct InputPort<T> {
+pub struct InputPort<T> {
     id: usize,
     data: MessageBuffer<T>,
 }
@@ -116,7 +116,7 @@ impl<T> MessageBuffer<T> {
 }
 
 #[derive(Clone)]
-struct OutputPort<T>
+pub struct OutputPort<T>
 where
     T: Clone,
 {
@@ -133,14 +133,14 @@ impl<T: Clone> OutputPort<T> {
 }
 
 impl Dataflow {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Dataflow {
             operators: Vec::new(),
             schedule: Rc::new(RefCell::new(Schedule::new())),
         }
     }
 
-    fn run(mut self) {
+    pub fn run(&mut self) {
         loop {
             let id = if let Some(v) = (*self.schedule).borrow_mut().pop() {
                 v
@@ -152,11 +152,11 @@ impl Dataflow {
         }
     }
 
-    fn add_edge<T: Clone>(&mut self, o: OutputPort<T>, i: InputPort<T>) {
+    pub fn add_edge<T: Clone>(&mut self, o: OutputPort<T>, i: InputPort<T>) {
         (*o.subscribers).borrow_mut().push((i.id, i.data.writer()));
     }
 
-    fn add_source<F: 'static, O: 'static>(&mut self, mut f: F) -> OutputPort<O>
+    pub fn add_source<F: 'static, O: 'static>(&mut self, mut f: F) -> OutputPort<O>
     where
         F: FnMut(&SendCtx<O>),
         O: Clone,
@@ -164,7 +164,7 @@ impl Dataflow {
         self.add_op(move |_recv: &RecvCtx<()>, send| f(send)).1
     }
 
-    fn add_sink<F: 'static, I: 'static>(&mut self, mut f: F) -> InputPort<I>
+    pub fn add_sink<F: 'static, I: 'static>(&mut self, mut f: F) -> InputPort<I>
     where
         F: FnMut(&RecvCtx<I>),
         I: Clone,
@@ -182,7 +182,7 @@ impl Dataflow {
         }
     }
 
-    fn add_op_2<F: 'static, I1: 'static, I2: 'static, O: 'static>(
+    pub fn add_op_2<F: 'static, I1: 'static, I2: 'static, O: 'static>(
         &mut self,
         mut f: F,
     ) -> (InputPort<I1>, InputPort<I2>, OutputPort<O>)
@@ -209,7 +209,7 @@ impl Dataflow {
         )
     }
 
-    fn add_op<F: 'static, I: 'static, O: 'static>(
+    pub fn add_op<F: 'static, I: 'static, O: 'static>(
         &mut self,
         mut f: F,
     ) -> (InputPort<I>, OutputPort<O>)

@@ -4,6 +4,7 @@ use babyflow::{Ctx, Dataflow, Operator};
 
 mod babyflow;
 mod babyflow2;
+mod query;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Datum {
