@@ -81,6 +81,7 @@ where
     }
 }
 
+#[derive(Clone)]
 pub struct InputPort<T> {
     id: usize,
     data: MessageBuffer<T>,

@@ -4,10 +4,10 @@ use std::{
     rc::Rc,
 };
 
-use crate::babyflow2::{Dataflow, OutputPort, RecvCtx, SendCtx};
+use crate::babyflow2::{Dataflow, InputPort, OutputPort, RecvCtx, SendCtx};
 
 #[derive(Clone)]
-struct Operator<T>
+pub struct Operator<T>
 where
     T: Clone,
 {
@@ -19,7 +19,7 @@ impl<T> Operator<T>
 where
     T: Clone,
 {
-    fn distinct(self, rhs: Operator<T>) -> Operator<T>
+    pub fn distinct(self) -> Operator<T>
     where
         T: Eq + std::hash::Hash + 'static,
     {
@@ -41,7 +41,7 @@ where
         }
     }
 
-    fn union(self, rhs: Operator<T>) -> Operator<T>
+    pub fn union(self, rhs: Operator<T>) -> Operator<T>
     where
         T: 'static,
     {
@@ -64,7 +64,28 @@ where
         }
     }
 
-    fn map<U, F>(self, f: F) -> Operator<U>
+    pub fn filter<F>(self, f: F) -> Operator<T>
+    where
+        F: Fn(&T) -> bool + 'static,
+        T: 'static,
+    {
+        let mut df = (*self.df).borrow_mut();
+        let (input, output_port) = df.add_op(move |recv, send| {
+            while let Some(v) = recv.pull() {
+                if f(&v) {
+                    send.push(v)
+                }
+            }
+        });
+        df.add_edge(self.output_port.clone(), input);
+
+        Operator {
+            df: self.df.clone(),
+            output_port,
+        }
+    }
+
+    pub fn map<U, F>(self, f: F) -> Operator<U>
     where
         F: Fn(T) -> U + 'static,
         T: 'static,
@@ -84,7 +105,7 @@ where
         }
     }
 
-    fn sink<F>(self, f: F)
+    pub fn sink<F>(self, f: F)
     where
         F: Fn(T) + 'static,
         T: Clone + 'static,
@@ -104,7 +125,7 @@ where
     K: Eq + std::hash::Hash + Clone + 'static,
     V: Clone + 'static,
 {
-    fn join<V2>(self, rhs: Operator<(K, V2)>) -> Operator<(K, V, V2)>
+    pub fn join<V2>(self, rhs: Operator<(K, V2)>) -> Operator<(K, V, V2)>
     where
         V2: Clone + 'static,
     {
@@ -151,18 +172,25 @@ where
     }
 }
 
-struct Query {
-    df: Rc<RefCell<Dataflow>>,
+pub struct Query {
+    pub df: Rc<RefCell<Dataflow>>,
 }
 
 impl Query {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Query {
             df: Rc::new(RefCell::new(Dataflow::new())),
         }
     }
 
-    fn source<T, F>(&mut self, f: F) -> Operator<T>
+    pub fn wire<T>(&mut self, o: Operator<T>, p: InputPort<T>)
+    where
+        T: Clone + 'static,
+    {
+        (*self.df).borrow_mut().add_edge(o.output_port, p)
+    }
+
+    pub fn source<T, F>(&mut self, f: F) -> Operator<T>
     where
         T: Clone + 'static,
         F: FnMut(&SendCtx<T>) + 'static,
@@ -172,6 +200,26 @@ impl Query {
             df: self.df.clone(),
             output_port,
         }
+    }
+
+    pub fn merge<T>(&mut self) -> (InputPort<T>, Operator<T>)
+    where
+        T: Clone + 'static,
+    {
+        let mut df = (*self.df).borrow_mut();
+        let (input, output_port) = df.add_op(move |recv, send| {
+            while let Some(v) = recv.pull() {
+                send.push(v)
+            }
+        });
+
+        (
+            input,
+            Operator {
+                df: self.df.clone(),
+                output_port,
+            },
+        )
     }
 }
 

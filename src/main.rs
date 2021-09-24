@@ -1,6 +1,14 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, HashMap, HashSet},
+    rc::Rc,
+};
 
-use babyflow::{Ctx, Dataflow, Operator};
+use babyflow2::Dataflow;
+// use babyflow::{Ctx, Dataflow, Operator};
+use query::Query;
+
+use crate::{babyflow2::SendCtx, query::Operator};
 
 mod babyflow;
 mod babyflow2;
@@ -116,44 +124,31 @@ impl Program {
         }
     }
 
-    fn render(mut self, out_rel: &str) -> Dataflow<Vec<Datum>, DataOp> {
+    fn render(mut self, out_rel: &str) -> Vec<Vec<Datum>> {
         let out_rel = self.intern(out_rel);
-        let (mut df, outbox) = Dataflow::new();
+        let mut q = Query::new();
 
         let mut ops = HashMap::new();
-
         for (name, _) in self.relations.iter() {
-            let op_id = df.add_op(DataOp::Distinct(HashSet::new()));
-            ops.insert(name, op_id);
+            let (input, operator): (_, Operator<Vec<Datum>>) = q.merge();
+            ops.insert(name, (input, operator.distinct()));
         }
 
-        // Semantics here:
-        // Take the join of all the predicates in the body, subject to their shared variables.
-
         for (name, rel) in self.relations.iter() {
+            let (merged, _) = &*ops.get(name).unwrap();
+
             for (head, body) in &rel.clauses {
-                // First collect all the constant predicates.
-
-                let mut inputs = Vec::new();
-
-                for pred in body {
-                    let op = *ops.get(&pred.name).unwrap();
-                    let pred_exprs: Vec<_> = pred
-                        .constants
-                        .iter()
-                        .map(|(col, d)| PredExpr::EqConstant(*col, d.clone()))
-                        .collect();
-
-                    let filtered = df.add_op(DataOp::Select(pred_exprs));
-                    df.add_edge(op, filtered, 0);
-                    inputs.push(filtered);
-                }
-
                 let mut processed_vars = HashMap::new();
                 let mut len = 0;
+                let mut join = q.source(|send: &SendCtx<Vec<Datum>>| send.push(vec![]));
+                for pred in body {
+                    let (_, operator) = &*ops.get(&pred.name).unwrap();
 
-                let mut join = df.add_op(DataOp::Source(vec![vec![]]));
-                for (i, pred) in body.iter().enumerate() {
+                    let p = pred.clone();
+                    let filtered = operator.clone().filter(move |row| {
+                        p.constants.iter().all(|(col, datum)| row[*col] == *datum)
+                    });
+
                     let mut left_key = Vec::new();
                     let mut right_key = Vec::new();
 
@@ -165,25 +160,31 @@ impl Program {
                             processed_vars.insert(name, len + idx);
                         }
                     }
-                    let lhs = join;
-                    join = df.add_op(DataOp::Join {
-                        left_key,
-                        right_key,
-                        left: HashMap::new(),
-                        right: HashMap::new(),
-                    });
-                    df.add_edge(lhs, join, 0);
-                    df.add_edge(inputs[i], join, 1);
                     len += pred.constants.len() + pred.variables.len();
+
+                    // Give each input the key structure... I guess if we were clever we'd remove them from the rhs.
+                    let keyed = filtered.map(move |row| {
+                        (
+                            right_key
+                                .iter()
+                                .map(|i| row[*i].clone())
+                                .collect::<Vec<_>>(),
+                            row,
+                        )
+                    });
+                    let keyed_join = join.clone().map(move |row| {
+                        (
+                            left_key.iter().map(|i| row[*i].clone()).collect::<Vec<_>>(),
+                            row,
+                        )
+                    });
+                    join = keyed_join.join(keyed).map(|(_k, v1, v2)| {
+                        v1.into_iter().chain(v2.into_iter()).collect::<Vec<_>>()
+                    });
                 }
 
-                // TODO: make this non-shitty
-
-                let mut projection = Vec::new();
                 let arity = head.constants.len() + head.variables.len();
-                for i in 0..arity {
-                    projection.push(None);
-                }
+                let mut projection: Vec<_> = (0..arity).map(|_| None).collect();
                 for (idx, v) in &head.variables {
                     projection[*idx] = Some(ColExpr::Var(*processed_vars.get(v).unwrap()));
                 }
@@ -191,120 +192,30 @@ impl Program {
                     projection[*idx] = Some(ColExpr::Datum(v.clone()))
                 }
 
-                let proj = df.add_op(DataOp::Project(
-                    projection.drain(..).map(|x| x.unwrap()).collect(),
-                ));
+                let proj: Vec<_> = projection.drain(..).map(|x| x.unwrap()).collect();
 
-                df.add_edge(join, proj, 0);
-                df.add_edge(proj, *ops.get(name).unwrap(), 0);
+                join = join.map(move |row| {
+                    proj.iter()
+                        .map(|e| match e {
+                            ColExpr::Datum(d) => d.clone(),
+                            ColExpr::Var(idx) => row[*idx].clone(),
+                        })
+                        .collect::<Vec<_>>()
+                });
+                q.wire(join, (*merged).clone())
             }
         }
 
-        df.add_edge(out_rel, outbox, 0);
+        let (_, out) = ops.get(&out_rel).unwrap().clone();
 
-        df
-    }
-}
+        let out_rows = Rc::new(RefCell::new(Vec::new()));
+        let moved = out_rows.clone();
+        out.sink(move |r| (*moved).borrow_mut().push(r));
 
-#[derive(Debug, Clone)]
-enum PredExpr {
-    EqConstant(usize, Datum),
-    EqCol(usize, usize),
-}
+        (*q.df).borrow_mut().run();
 
-impl PredExpr {
-    fn eval(&self, v: &[Datum]) -> bool {
-        match self {
-            PredExpr::EqConstant(i, d) => v[*i] == *d,
-            PredExpr::EqCol(i, j) => v[*i] == v[*j],
-        }
-    }
-}
-
-#[derive(Debug)]
-enum DataOp {
-    Source(Vec<Vec<Datum>>),
-    Project(Vec<ColExpr>),
-    Distinct(HashSet<Vec<Datum>>),
-    Select(Vec<PredExpr>),
-    Join {
-        left_key: Vec<usize>,
-        left: HashMap<Vec<Datum>, Vec<Vec<Datum>>>,
-        right_key: Vec<usize>,
-        right: HashMap<Vec<Datum>, Vec<Vec<Datum>>>,
-    },
-}
-
-impl Operator<Vec<Datum>> for DataOp {
-    fn run(&mut self, c: &mut Ctx<Vec<Datum>>) {
-        match self {
-            DataOp::Source(v) => {
-                for i in v.drain(..) {
-                    c.send(i);
-                }
-            }
-            DataOp::Project(vs) => {
-                while let Some((v, _)) = c.recv() {
-                    c.send(
-                        vs.iter()
-                            .map(|c| match c {
-                                ColExpr::Datum(d) => d.clone(),
-                                ColExpr::Var(i) => v[*i].clone(),
-                            })
-                            .collect(),
-                    );
-                }
-            }
-            DataOp::Select(preds) => {
-                while let Some((v, _)) = c.recv() {
-                    if preds.iter().all(|p| p.eval(&v)) {
-                        c.send(v);
-                    }
-                }
-            }
-            DataOp::Distinct(h) => {
-                while let Some((row, _)) = c.recv() {
-                    if !h.contains(&row) {
-                        h.insert(row.clone());
-                        c.send(row);
-                    }
-                }
-            }
-            DataOp::Join {
-                left_key,
-                left,
-                right_key,
-                right,
-            } => {
-                while let Some((row, port)) = c.recv() {
-                    match port {
-                        0 => {
-                            let key: Vec<_> = left_key.iter().map(|i| row[*i].clone()).collect();
-
-                            if let Some(matches) = right.get(&key) {
-                                for m in matches {
-                                    c.send(row.iter().chain(m).cloned().collect());
-                                }
-                            }
-
-                            left.entry(key).or_insert_with(Vec::new).push(row);
-                        }
-                        1 => {
-                            let key: Vec<_> = right_key.iter().map(|i| row[*i].clone()).collect();
-
-                            if let Some(matches) = left.get(&key) {
-                                for m in matches {
-                                    c.send(m.iter().chain(row.iter()).cloned().collect());
-                                }
-                            }
-
-                            right.entry(key).or_insert(vec![]).push(row);
-                        }
-                        _ => panic!("unhandled"),
-                    }
-                }
-            }
-        }
+        let x = (*out_rows).borrow_mut().drain(..).collect();
+        x
     }
 }
 
@@ -342,7 +253,7 @@ fn main() {
         ],
     );
 
-    let df = p.render("reachable");
+    let results = p.render("reachable");
 
     // p.clause(
     //     (
@@ -371,5 +282,5 @@ fn main() {
 
     // let df = p.render("triangle");
 
-    println!("{:#?}", df.run());
+    println!("{:#?}", results);
 }
