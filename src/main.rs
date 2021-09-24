@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use babyflow::{Ctx, Dataflow, Operator};
 
 mod babyflow;
+mod babyflow2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Datum {
