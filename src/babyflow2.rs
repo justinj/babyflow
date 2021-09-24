@@ -76,14 +76,43 @@ where
     fn push(&self, o: O) {
         for (id, sub) in &*(*self.output_port.subscribers).borrow() {
             self.output_port.schedule.borrow_mut().insert(*id);
-            (*sub).borrow_mut().push_back(o.clone());
+            sub.push(o.clone())
         }
     }
 }
 
 struct InputPort<T> {
     id: usize,
+    data: MessageBuffer<T>,
+}
+
+struct Writer<T> {
     data: Rc<RefCell<VecDeque<T>>>,
+}
+
+impl<T> Writer<T> {
+    fn push(&self, t: T) {
+        (*self.data).borrow_mut().push_back(t)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MessageBuffer<T> {
+    data: Rc<RefCell<VecDeque<T>>>,
+}
+
+impl<T> MessageBuffer<T> {
+    fn new() -> (Self, RecvCtx<T>) {
+        let data = Rc::new(RefCell::new(VecDeque::new()));
+        let d2 = data.clone();
+        (MessageBuffer { data }, RecvCtx { inputs: d2 })
+    }
+
+    fn writer(&self) -> Writer<T> {
+        Writer {
+            data: self.data.clone(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -92,7 +121,15 @@ where
     T: Clone,
 {
     schedule: Rc<RefCell<Schedule<usize>>>,
-    subscribers: Rc<RefCell<Vec<(usize, Rc<RefCell<VecDeque<T>>>)>>>,
+    subscribers: Rc<RefCell<Vec<(usize, Writer<T>)>>>,
+}
+
+impl<T: Clone> OutputPort<T> {
+    fn send_ctx(&self) -> SendCtx<T> {
+        SendCtx {
+            output_port: self.clone(),
+        }
+    }
 }
 
 impl Dataflow {
@@ -116,7 +153,7 @@ impl Dataflow {
     }
 
     fn add_edge<T: Clone>(&mut self, o: OutputPort<T>, i: InputPort<T>) {
-        (*o.subscribers).borrow_mut().push((i.id, i.data.clone()));
+        (*o.subscribers).borrow_mut().push((i.id, i.data.writer()));
     }
 
     fn add_source<F: 'static, O: 'static>(&mut self, mut f: F) -> OutputPort<O>
@@ -135,6 +172,16 @@ impl Dataflow {
         self.add_op(move |recv, _send: &SendCtx<()>| f(recv)).0
     }
 
+    fn make_output_port<T>(&mut self) -> OutputPort<T>
+    where
+        T: Clone,
+    {
+        OutputPort {
+            schedule: self.schedule.clone(),
+            subscribers: Rc::new(RefCell::new(Vec::new())),
+        }
+    }
+
     fn add_op_2<F: 'static, I1: 'static, I2: 'static, O: 'static>(
         &mut self,
         mut f: F,
@@ -144,37 +191,20 @@ impl Dataflow {
         O: Clone,
     {
         let id = self.operators.len();
-        let inputs1 = Rc::new(RefCell::new(VecDeque::<I1>::new()));
-        let recv1 = RecvCtx {
-            inputs: inputs1.clone(),
-        };
-        let inputs2 = Rc::new(RefCell::new(VecDeque::<I2>::new()));
-        let recv2 = RecvCtx {
-            inputs: inputs2.clone(),
-        };
+        let (buf1, recv1) = MessageBuffer::new();
+        let (buf2, recv2) = MessageBuffer::new();
 
-        let output_port = OutputPort {
-            schedule: self.schedule.clone(),
-            subscribers: Rc::new(RefCell::new(Vec::new())),
-        };
-        let send_ctx = SendCtx {
-            output_port: output_port.clone(),
-        };
+        let output_port = self.make_output_port();
 
-        let op = move || f(&recv1, &recv2, &send_ctx);
+        let send = output_port.send_ctx();
+        let op = move || f(&recv1, &recv2, &send);
 
         self.operators.push(Box::new(op));
         (*self.schedule).borrow_mut().insert(id);
 
         (
-            InputPort {
-                id,
-                data: inputs1.clone(),
-            },
-            InputPort {
-                id,
-                data: inputs2.clone(),
-            },
+            InputPort { id, data: buf1 },
+            InputPort { id, data: buf2 },
             output_port,
         )
     }
@@ -188,29 +218,17 @@ impl Dataflow {
         O: Clone,
     {
         let id = self.operators.len();
-        let recv_ctx = RecvCtx::new();
-        let inputs = recv_ctx.inputs.clone();
+        let (inputs, recv) = MessageBuffer::new();
 
-        let output_port = OutputPort {
-            schedule: self.schedule.clone(),
-            subscribers: Rc::new(RefCell::new(Vec::new())),
-        };
-        let send_ctx = SendCtx {
-            output_port: output_port.clone(),
-        };
+        let output_port = self.make_output_port();
 
-        let op = move || f(&recv_ctx, &send_ctx);
+        let send = output_port.send_ctx();
+        let op = move || f(&recv, &send);
 
         self.operators.push(Box::new(op));
         (*self.schedule).borrow_mut().insert(id);
 
-        (
-            InputPort {
-                id,
-                data: inputs.clone(),
-            },
-            output_port,
-        )
+        (InputPort { id, data: inputs }, output_port)
     }
 }
 
