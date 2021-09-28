@@ -4,24 +4,15 @@ use std::{
     rc::Rc,
 };
 
-use parser::Datum;
-// use babyflow::{Ctx, Dataflow, Operator};
-use query::Query;
+use datadriven::walk;
 
-use crate::{babyflow2::SendCtx, query::Operator};
-
-mod babyflow2;
-mod datalog;
-mod parser;
-mod query;
+use crate::{
+    babyflow2::SendCtx,
+    parser::{parse, Datum, Expr},
+    query::{Operator, Query},
+};
 
 type Ident = usize;
-
-#[derive(Debug, Clone)]
-enum Expr {
-    Datum(Datum),
-    Var(String),
-}
 
 #[derive(Debug, Clone)]
 enum ColExpr {
@@ -37,12 +28,6 @@ struct Predicate {
     variables: Vec<(usize, Ident)>,
 }
 
-// impl Predicate {
-//     pub fn new(name: String, args: Vec<Expr>) -> Self {
-//         Predicate { name, args }
-//     }
-// }
-
 #[derive(Debug, Clone)]
 struct Relation {
     clauses: Vec<(Predicate, Vec<Predicate>)>,
@@ -51,7 +36,6 @@ struct Relation {
 #[derive(Debug, Clone)]
 struct Program {
     idents: HashMap<String, Ident>,
-    // predicates: Vec<Vec<Predicate>>,
     relations: BTreeMap<Ident, Relation>,
 }
 
@@ -215,68 +199,30 @@ impl Program {
     }
 }
 
-fn main() {
-    let mut p = Program::new();
+#[test]
+fn test_datalog() {
+    walk("src/testdata/datalog", |f| {
+        f.run(|test_case| {
+            let s = parse(&test_case.input).unwrap();
+            let mut p = Program::new();
+            for clause in s.clauses {
+                p.clause(
+                    (&clause.head.name, clause.head.args),
+                    &clause
+                        .body
+                        .into_iter()
+                        .map(|pred| (pred.name, pred.args))
+                        .collect::<Vec<_>>(),
+                )
+            }
 
-    for (a, b) in vec![
-        (1, 2),
-        (2, 3),
-        (1, 3),
-        (1, 4),
-        (1, 2),
-        (2, 4),
-        (4, 5),
-        (6, 7),
-    ] {
-        p.clause(
-            (
-                "edge",
-                vec![Expr::Datum(Datum::Int(a)), Expr::Datum(Datum::Int(b))],
-            ),
-            &[],
-        );
-    }
-
-    p.clause(("reachable", vec![Expr::Datum(Datum::Int(1))]), &[]);
-    p.clause(
-        ("reachable", vec![Expr::Var("A".into())]),
-        &[
-            ("reachable".into(), vec![Expr::Var("B".into())]),
-            (
-                "edge".into(),
-                vec![Expr::Var("B".into()), Expr::Var("A".into())],
-            ),
-        ],
-    );
-
-    let results = p.render("reachable");
-
-    // p.clause(
-    //     (
-    //         "triangle".into(),
-    //         vec![
-    //             Expr::Var("A".into()),
-    //             Expr::Var("B".into()),
-    //             Expr::Var("C".into()),
-    //         ],
-    //     ),
-    //     &[
-    //         (
-    //             "edge".into(),
-    //             vec![Expr::Var("A".into()), Expr::Var("B".into())],
-    //         ),
-    //         (
-    //             "edge".into(),
-    //             vec![Expr::Var("B".into()), Expr::Var("C".into())],
-    //         ),
-    //         (
-    //             "edge".into(),
-    //             vec![Expr::Var("A".into()), Expr::Var("C".into())],
-    //         ),
-    //     ],
-    // );
-
-    // let df = p.render("triangle");
-
-    println!("{:#?}", results);
+            let mut out = String::new();
+            let results = p.render(&test_case.args.get("out").unwrap()[0]);
+            for res in results {
+                out.push_str(&format!("{:?}\n", res));
+            }
+            out
+        });
+        // f.run(|test_case| format!("{:#?}\n", parse(&test_case.input).unwrap()))
+    })
 }
