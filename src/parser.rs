@@ -1,17 +1,6 @@
 use anyhow::{anyhow, bail};
-use datadriven::walk;
 
-// TODO: move this to a `lang` package.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Datum {
-    Int(i64),
-}
-
-#[derive(Debug, Clone)]
-pub enum Expr {
-    Var(String),
-    Datum(Datum),
-}
+use crate::lang::{Datum, Expr};
 
 #[derive(Debug, Clone)]
 pub struct Predicate {
@@ -109,8 +98,12 @@ impl Parser {
             bail!("expected expr");
         }
         if self.chars[self.idx].is_alphabetic() {
-            let var_name = self.word()?;
-            Ok(Expr::Var(var_name))
+            let name = self.word()?;
+            if name.chars().next().unwrap().is_uppercase() {
+                Ok(Expr::Var(name))
+            } else {
+                Ok(Expr::Datum(Datum::Atom(name)))
+            }
         } else if self.chars[self.idx].is_numeric() {
             let mut s = String::new();
             while self.idx < self.chars.len() && self.chars[self.idx].is_numeric() {
@@ -156,6 +149,8 @@ pub fn parse(s: &str) -> anyhow::Result<Syntax> {
 
 #[test]
 fn test_parse() {
+    use datadriven::walk;
+
     walk("src/testdata/parse", |f| {
         f.run(|test_case| format!("{:#?}\n", parse(&test_case.input).unwrap()))
     })

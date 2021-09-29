@@ -4,7 +4,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::babyflow2::{Dataflow, InputPort, OutputPort, RecvCtx, SendCtx};
+use crate::babyflow::{Dataflow, InputPort, OutputPort, RecvCtx, SendCtx};
 
 #[derive(Clone)]
 pub struct Operator<T>

@@ -7,8 +7,9 @@ use std::{
 use datadriven::walk;
 
 use crate::{
-    babyflow2::SendCtx,
-    parser::{parse, Datum, Expr},
+    babyflow::SendCtx,
+    lang::{Datum, Expr},
+    parser::parse,
     query::{Operator, Query},
 };
 
@@ -217,12 +218,18 @@ fn test_datalog() {
             }
 
             let mut out = String::new();
-            let results = p.render(&test_case.args.get("out").unwrap()[0]);
+            let out_rel = &test_case.args.get("out").unwrap()[0];
+            let results = p.render(out_rel);
             for res in results {
-                out.push_str(&format!("{:?}\n", res));
+                out.push_str(&format!("{}(", out_rel));
+                let mut sep = "";
+                for d in res {
+                    out.push_str(&format!("{}{}", sep, d));
+                    sep = ", ";
+                }
+                out.push_str(&format!(").\n"));
             }
             out
         });
-        // f.run(|test_case| format!("{:#?}\n", parse(&test_case.input).unwrap()))
     })
 }

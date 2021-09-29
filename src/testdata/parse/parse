@@ -33,8 +33,10 @@ Syntax {
             head: Predicate {
                 name: "a",
                 args: [
-                    Var(
-                        "z",
+                    Datum(
+                        Atom(
+                            "z",
+                        ),
                     ),
                 ],
             },
@@ -68,6 +70,44 @@ Syntax {
                         ),
                         Var(
                             "A",
+                        ),
+                    ],
+                },
+            ],
+        },
+    ],
+}
+
+parse
+a(A) <- b(1, A, a).
+----
+Syntax {
+    clauses: [
+        Clause {
+            head: Predicate {
+                name: "a",
+                args: [
+                    Var(
+                        "A",
+                    ),
+                ],
+            },
+            body: [
+                Predicate {
+                    name: "b",
+                    args: [
+                        Datum(
+                            Int(
+                                1,
+                            ),
+                        ),
+                        Var(
+                            "A",
+                        ),
+                        Datum(
+                            Atom(
+                                "a",
+                            ),
                         ),
                     ],
                 },

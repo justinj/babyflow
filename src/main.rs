@@ -4,14 +4,15 @@ use std::{
     rc::Rc,
 };
 
-use parser::Datum;
+use lang::Datum;
 // use babyflow::{Ctx, Dataflow, Operator};
 use query::Query;
 
-use crate::{babyflow2::SendCtx, query::Operator};
+use crate::{babyflow::SendCtx, query::Operator};
 
-mod babyflow2;
+mod babyflow;
 mod datalog;
+mod lang;
 mod parser;
 mod query;
 
@@ -216,67 +217,41 @@ impl Program {
 }
 
 fn main() {
-    let mut p = Program::new();
+    // let mut p = Program::new();
 
-    for (a, b) in vec![
-        (1, 2),
-        (2, 3),
-        (1, 3),
-        (1, 4),
-        (1, 2),
-        (2, 4),
-        (4, 5),
-        (6, 7),
-    ] {
-        p.clause(
-            (
-                "edge",
-                vec![Expr::Datum(Datum::Int(a)), Expr::Datum(Datum::Int(b))],
-            ),
-            &[],
-        );
-    }
+    // for (a, b) in vec![
+    //     (1, 2),
+    //     (2, 3),
+    //     (1, 3),
+    //     (1, 4),
+    //     (1, 2),
+    //     (2, 4),
+    //     (4, 5),
+    //     (6, 7),
+    // ] {
+    //     p.clause(
+    //         (
+    //             "edge",
+    //             vec![Expr::Datum(Datum::Int(a)), Expr::Datum(Datum::Int(b))],
+    //         ),
+    //         &[],
+    //     );
+    // }
 
-    p.clause(("reachable", vec![Expr::Datum(Datum::Int(1))]), &[]);
-    p.clause(
-        ("reachable", vec![Expr::Var("A".into())]),
-        &[
-            ("reachable".into(), vec![Expr::Var("B".into())]),
-            (
-                "edge".into(),
-                vec![Expr::Var("B".into()), Expr::Var("A".into())],
-            ),
-        ],
-    );
-
-    let results = p.render("reachable");
-
+    // p.clause(("reachable", vec![Expr::Datum(Datum::Int(1))]), &[]);
     // p.clause(
-    //     (
-    //         "triangle".into(),
-    //         vec![
-    //             Expr::Var("A".into()),
-    //             Expr::Var("B".into()),
-    //             Expr::Var("C".into()),
-    //         ],
-    //     ),
+    //     ("reachable", vec![Expr::Var("A".into())]),
     //     &[
+    //         ("reachable".into(), vec![Expr::Var("B".into())]),
     //         (
     //             "edge".into(),
-    //             vec![Expr::Var("A".into()), Expr::Var("B".into())],
-    //         ),
-    //         (
-    //             "edge".into(),
-    //             vec![Expr::Var("B".into()), Expr::Var("C".into())],
-    //         ),
-    //         (
-    //             "edge".into(),
-    //             vec![Expr::Var("A".into()), Expr::Var("C".into())],
+    //             vec![Expr::Var("B".into()), Expr::Var("A".into())],
     //         ),
     //     ],
     // );
 
-    // let df = p.render("triangle");
+    // let results = p.render("reachable");
 
-    println!("{:#?}", results);
+    // assert_eq!(results, Vec::<Vec<Datum>>::new());
+    // println!("{:?}", results);
 }
