@@ -4,6 +4,10 @@ use std::{
     rc::Rc,
 };
 
+mod query;
+
+pub use query::{Operator, Query};
+
 // TODO: make this work without clone.
 #[derive(Debug, Clone)]
 struct Schedule<T>
@@ -48,13 +52,8 @@ pub struct RecvCtx<T> {
     inputs: Rc<RefCell<VecDeque<T>>>,
 }
 
-impl<T> RecvCtx<T> {
-    fn new() -> Self {
-        RecvCtx {
-            inputs: Rc::new(RefCell::new(VecDeque::new())),
-        }
-    }
-}
+// impl<T> RecvCtx<T> {
+// }
 
 pub struct SendCtx<O>
 where

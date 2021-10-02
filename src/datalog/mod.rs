@@ -4,14 +4,13 @@ use std::{
     rc::Rc,
 };
 
-use datadriven::walk;
+mod lang;
+mod parser;
 
-use crate::{
-    babyflow::SendCtx,
-    lang::{Datum, Expr},
-    parser::parse,
-    query::{Operator, Query},
-};
+pub use lang::{Datum, Expr};
+use parser::parse;
+
+use crate::babyflow::{Operator, Query, SendCtx};
 
 type Ident = usize;
 
@@ -35,7 +34,7 @@ struct Relation {
 }
 
 #[derive(Debug, Clone)]
-struct Program {
+pub struct Program {
     idents: HashMap<String, Ident>,
     relations: BTreeMap<Ident, Relation>,
 }
@@ -46,6 +45,22 @@ impl Program {
             idents: HashMap::new(),
             relations: BTreeMap::new(),
         }
+    }
+
+    pub fn build(s: &str) -> Self {
+        let s = parse(s).unwrap();
+        let mut p = Program::new();
+        for clause in s.clauses {
+            p.clause(
+                (&clause.head.name, clause.head.args),
+                &clause
+                    .body
+                    .into_iter()
+                    .map(|pred| (pred.name, pred.args))
+                    .collect::<Vec<_>>(),
+            )
+        }
+        p
     }
 
     fn intern(&mut self, name: &str) -> Ident {
@@ -80,10 +95,6 @@ impl Program {
         }
     }
 
-    pub fn constant(&mut self, d: Datum) -> Expr {
-        Expr::Datum(d)
-    }
-
     pub fn clause(&mut self, (name, args): (&str, Vec<Expr>), body: &[(String, Vec<Expr>)]) {
         let head = self.intern_predicate(name, &args);
 
@@ -105,7 +116,7 @@ impl Program {
         }
     }
 
-    fn render(mut self, out_rel: &str) -> Vec<Vec<Datum>> {
+    pub fn render(mut self, out_rel: &str) -> Vec<Vec<Datum>> {
         let out_rel = self.intern(out_rel);
         let mut q = Query::new();
 
@@ -202,20 +213,11 @@ impl Program {
 
 #[test]
 fn test_datalog() {
+    use datadriven::walk;
+
     walk("src/testdata/datalog", |f| {
         f.run(|test_case| {
-            let s = parse(&test_case.input).unwrap();
-            let mut p = Program::new();
-            for clause in s.clauses {
-                p.clause(
-                    (&clause.head.name, clause.head.args),
-                    &clause
-                        .body
-                        .into_iter()
-                        .map(|pred| (pred.name, pred.args))
-                        .collect::<Vec<_>>(),
-                )
-            }
+            let p = Program::build(&test_case.input);
 
             let mut out = String::new();
             let out_rel = &test_case.args.get("out").unwrap()[0];

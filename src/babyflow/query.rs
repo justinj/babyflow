@@ -41,6 +41,7 @@ where
         }
     }
 
+    #[allow(unused)]
     pub fn union(self, rhs: Operator<T>) -> Operator<T>
     where
         T: 'static,

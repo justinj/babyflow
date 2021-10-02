@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail};
 
-use crate::lang::{Datum, Expr};
+use super::lang::{Datum, Expr};
 
 #[derive(Debug, Clone)]
 pub struct Predicate {
