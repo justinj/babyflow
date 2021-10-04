@@ -8,7 +8,7 @@ use std::time::Duration;
 use timely::dataflow::operators::{Inspect, Map, ToStream};
 
 const NUM_OPS: usize = 20;
-const NUM_INTS: usize = 100_000;
+const NUM_INTS: usize = 1_000_000;
 
 // This benchmark runs babyflow which more-or-less just copies the data directly
 // between the operators, but with some extra overhead.
@@ -75,9 +75,7 @@ fn benchmark_speed_of_light(num_ops: usize, num_ints: usize) {
     let mut next = Vec::new();
 
     for _ in 0..num_ops {
-        for v in data.drain(..) {
-            next.push(v);
-        }
+        next.extend(data.drain(..));
         std::mem::swap(&mut data, &mut next);
     }
 
@@ -87,7 +85,7 @@ fn benchmark_speed_of_light(num_ops: usize, num_ints: usize) {
 }
 
 fn criterion_speed_of_light(c: &mut Criterion) {
-    c.bench_function("speed of light", |b| {
+    c.bench_function("raw copy", |b| {
         b.iter(|| benchmark_speed_of_light(NUM_OPS, NUM_INTS))
     });
 }
@@ -111,9 +109,7 @@ fn benchmark_iter(num_ints: usize) {
 
 fn criterion_iter(c: &mut Criterion) {
     c.bench_function("iter (vanilla rust)", |b| {
-        b.iter(|| {
-            benchmark_iter(NUM_INTS)
-        });
+        b.iter(|| benchmark_iter(NUM_INTS));
     });
 }
 
@@ -133,12 +129,9 @@ fn benchmark_iter_collect(num_ops: usize, num_ints: usize) {
 
 fn criterion_iter_collect(c: &mut Criterion) {
     c.bench_function("iter-collect", |b| {
-        b.iter(|| {
-            benchmark_iter_collect(NUM_OPS, NUM_INTS)
-        });
+        b.iter(|| benchmark_iter_collect(NUM_OPS, NUM_INTS));
     });
 }
-
 
 fn criterion_timely(c: &mut Criterion) {
     c.bench_function("timely", |b| {
