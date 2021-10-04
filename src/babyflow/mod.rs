@@ -73,7 +73,7 @@ where
     O: Clone,
 {
     id: usize,
-    subscribers: Rc<RefCell<Vec<(usize, Writer<O>)>>>,
+    subscribers: Rc<RefCell<Vec<Writer<O>>>>,
     dirty: Rc<RefCell<bool>>,
 }
 
@@ -82,7 +82,7 @@ where
     O: Clone,
 {
     pub fn push(&self, o: O) {
-        for (_, sub) in &*(*self.subscribers).borrow() {
+        for sub in &*(*self.subscribers).borrow() {
             sub.push(o.clone())
         }
         *(*self.dirty).borrow_mut() = true;
@@ -156,7 +156,7 @@ impl Dataflow {
     }
 
     pub fn add_edge<T: Clone>(&mut self, o: SendCtx<T>, i: InputPort<T>) {
-        (*o.subscribers).borrow_mut().push((i.id, i.data.writer()));
+        (*o.subscribers).borrow_mut().push(i.data.writer());
         self.adjacencies[o.id].push(i.id);
     }
 
