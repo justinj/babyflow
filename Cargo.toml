@@ -12,6 +12,7 @@ datadriven = "0.6.0"
 
 [dev-dependencies]
 criterion = "0.3"
+timely = "*"
 
 [[bench]]
 name = "identity"

@@ -5,6 +5,7 @@ use datalog::babyflow::Query;
 use std::sync::mpsc::channel;
 use std::thread::{self, sleep};
 use std::time::Duration;
+use timely::dataflow::operators::{Inspect, Map, ToStream};
 
 const NUM_OPS: usize = 20;
 const NUM_INTS: usize = 1000000;
@@ -91,8 +92,28 @@ fn criterion_speed_of_light(c: &mut Criterion) {
     });
 }
 
+
+fn criterion_timely(c: &mut Criterion) {
+    c.bench_function("timely", |b| {
+        b.iter(|| {
+            timely::example(|scope| {
+                let mut op = (0..NUM_INTS).to_stream(scope);
+                for _ in 0..NUM_OPS {
+                    op = op.map(|i| i)
+                }
+
+                op.inspect(|i| {
+                    black_box(i);
+                });
+            });
+        })
+    });
+}
+
+
 criterion_group!(
-    identity_dataflows,
+    identity_dataflow,
+    criterion_timely,
     criterion_babyflow,
     criterion_pipeline,
     criterion_speed_of_light,
