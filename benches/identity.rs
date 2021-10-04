@@ -72,13 +72,13 @@ fn criterion_pipeline(c: &mut Criterion) {
 // single thread).
 fn benchmark_speed_of_light(num_ops: usize, num_ints: usize) {
     let mut data: Vec<_> = (0..num_ints).collect();
+    let mut next = Vec::new();
 
     for _ in 0..num_ops {
-        let mut next = Vec::new();
         for v in data.drain(..) {
             next.push(v);
         }
-        data = next;
+        std::mem::swap(&mut data, &mut next);
     }
 
     for elt in data {
@@ -91,7 +91,6 @@ fn criterion_speed_of_light(c: &mut Criterion) {
         b.iter(|| benchmark_speed_of_light(NUM_OPS, NUM_INTS))
     });
 }
-
 
 fn criterion_timely(c: &mut Criterion) {
     c.bench_function("timely", |b| {
@@ -109,7 +108,6 @@ fn criterion_timely(c: &mut Criterion) {
         })
     });
 }
-
 
 criterion_group!(
     identity_dataflow,
