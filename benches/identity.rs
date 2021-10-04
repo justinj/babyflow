@@ -8,7 +8,7 @@ use std::time::Duration;
 use timely::dataflow::operators::{Inspect, Map, ToStream};
 
 const NUM_OPS: usize = 20;
-const NUM_INTS: usize = 1000000;
+const NUM_INTS: usize = 100_000;
 
 // This benchmark runs babyflow which more-or-less just copies the data directly
 // between the operators, but with some extra overhead.
@@ -92,6 +92,54 @@ fn criterion_speed_of_light(c: &mut Criterion) {
     });
 }
 
+fn benchmark_iter(num_ints: usize) {
+    let data: Vec<_> = (0..num_ints).collect();
+
+    let iter = data.into_iter();
+
+    ///// MAGIC NUMBER!!!!!!!! is NUM_OPS
+    seq_macro::seq!(N in 0..20 {
+        let iter = iter.map(black_box);
+    });
+
+    let data: Vec<_> = iter.collect();
+
+    for elt in data {
+        black_box(elt);
+    }
+}
+
+fn criterion_iter(c: &mut Criterion) {
+    c.bench_function("iter (vanilla rust)", |b| {
+        b.iter(|| {
+            benchmark_iter(NUM_INTS)
+        });
+    });
+}
+
+fn benchmark_iter_collect(num_ops: usize, num_ints: usize) {
+    let mut data: Vec<_> = (0..num_ints).collect();
+
+    for _ in 0..num_ops {
+        let iter = data.into_iter();
+        let iter = iter.map(black_box);
+        data = iter.collect();
+    }
+
+    for elt in data {
+        black_box(elt);
+    }
+}
+
+fn criterion_iter_collect(c: &mut Criterion) {
+    c.bench_function("iter-collect", |b| {
+        b.iter(|| {
+            benchmark_iter_collect(NUM_OPS, NUM_INTS)
+        });
+    });
+}
+
+
 fn criterion_timely(c: &mut Criterion) {
     c.bench_function("timely", |b| {
         b.iter(|| {
@@ -114,6 +162,8 @@ criterion_group!(
     criterion_timely,
     criterion_babyflow,
     criterion_pipeline,
+    criterion_iter,
+    criterion_iter_collect,
     criterion_speed_of_light,
 );
 criterion_main!(identity_dataflow);
