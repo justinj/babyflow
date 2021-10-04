@@ -52,8 +52,11 @@ pub struct RecvCtx<T> {
     inputs: Rc<RefCell<VecDeque<T>>>,
 }
 
-// impl<T> RecvCtx<T> {
-// }
+impl<T> RecvCtx<T> {
+    fn new(inputs: Rc<RefCell<VecDeque<T>>>) -> Self {
+        RecvCtx { inputs }
+    }
+}
 
 pub struct SendCtx<O>
 where
@@ -105,7 +108,7 @@ impl<T> MessageBuffer<T> {
     fn new() -> (Self, RecvCtx<T>) {
         let data = Rc::new(RefCell::new(VecDeque::new()));
         let d2 = data.clone();
-        (MessageBuffer { data }, RecvCtx { inputs: d2 })
+        (MessageBuffer { data }, RecvCtx::new(d2))
     }
 
     fn writer(&self) -> Writer<T> {
@@ -221,8 +224,8 @@ impl Dataflow {
         let (inputs, recv) = MessageBuffer::new();
 
         let output_port = self.make_output_port();
-
         let send = output_port.send_ctx();
+
         let op = move || f(&recv, &send);
 
         self.operators.push(Box::new(op));
