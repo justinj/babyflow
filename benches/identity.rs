@@ -133,6 +133,40 @@ fn criterion_iter_collect(c: &mut Criterion) {
     });
 }
 
+async fn benchmark_spinach(num_ints: usize) {
+    use spinach::comp::Comp;
+
+    type MyLatRepr = spinach::lattice::set_union::SetUnionRepr<spinach::tag::VEC, usize>;
+    let op = <spinach::op::OnceOp<MyLatRepr>>::new((0..num_ints).collect());
+
+    struct MyMorphism();
+    impl spinach::func::unary::Morphism for MyMorphism {
+        type InLatRepr = MyLatRepr;
+        type OutLatRepr = MyLatRepr;
+        fn call<Y: spinach::hide::Qualifier>(&self, item: spinach::hide::Hide<Y, Self::InLatRepr>) -> spinach::hide::Hide<Y, Self::OutLatRepr> {
+            item.map(black_box)
+        }
+    }
+
+    ///// MAGIC NUMBER!!!!!!!! is NUM_OPS
+    seq_macro::seq!(N in 0..20 {
+        let op = spinach::op::MorphismOp::new(op, MyMorphism());
+    });
+
+    let comp = spinach::comp::NullComp::new(op);
+    spinach::comp::CompExt::run(&comp).await.unwrap_err();
+}
+
+fn criterion_spinach(c: &mut Criterion) {
+    c.bench_function("spinach", |b| {
+        b.to_async(tokio::runtime::Runtime::new().unwrap())
+            .iter(|| {
+                benchmark_spinach(NUM_INTS)
+            });
+    });
+}
+
+
 fn criterion_timely(c: &mut Criterion) {
     c.bench_function("timely", |b| {
         b.iter(|| {
@@ -154,6 +188,7 @@ criterion_group!(
     identity_dataflow,
     criterion_timely,
     criterion_babyflow,
+    criterion_spinach,
     criterion_pipeline,
     criterion_iter,
     criterion_iter_collect,
