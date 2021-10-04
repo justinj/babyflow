@@ -94,9 +94,7 @@ where
     {
         let mut df = (*self.df).borrow_mut();
         let (input, output_port) = df.add_op(move |recv, send| {
-            while let Some(v) = recv.pull() {
-                send.push(f(v))
-            }
+            send.extend(recv.take_all().drain(..).map(|x| f(x)));
         });
         df.add_edge(self.output_port.clone(), input);
 

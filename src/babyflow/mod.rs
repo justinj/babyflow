@@ -52,20 +52,32 @@ pub struct Dataflow {
 }
 
 pub struct RecvCtx<T> {
-    inputs: Rc<RefCell<VecDeque<T>>>,
+    inputs: Rc<RefCell<Vec<T>>>,
 }
 
 impl<T> RecvCtx<T> {
-    fn new(inputs: Rc<RefCell<VecDeque<T>>>) -> Self {
+    fn new(inputs: Rc<RefCell<Vec<T>>>) -> Self {
         RecvCtx { inputs }
     }
 }
 
 impl<I> RecvCtx<I> {
     pub fn pull(&self) -> Option<I> {
-        (*self.inputs).borrow_mut().pop_front()
+        (*self.inputs).borrow_mut().pop()
+    }
+
+    pub fn take_all(&self) -> Vec<I> {
+        (*self.inputs).replace(Vec::new())
     }
 }
+
+// impl<T> Iterator for RecvCtx<T> {
+//     type Item = T;
+
+//     fn next(&mut self) -> Option<T> {
+//         (*self.inputs).borrow_mut().pop_front()
+//     }
+// }
 
 #[derive(Clone)]
 pub struct SendCtx<O>
@@ -87,6 +99,24 @@ where
         }
         *(*self.dirty).borrow_mut() = true;
     }
+
+    pub fn extend<I>(&self, it: I)
+    where
+        I: IntoIterator<Item = O>,
+    {
+        let subs = &*(*self.subscribers).borrow_mut();
+        // ? this `if` seems bad
+        if subs.len() == 1 {
+            subs[0].extend(it)
+        } else {
+            for o in it {
+                for sub in subs {
+                    sub.push(o.clone())
+                }
+            }
+        }
+        *(*self.dirty).borrow_mut() = true;
+    }
 }
 
 #[derive(Clone)]
@@ -96,23 +126,30 @@ pub struct InputPort<T> {
 }
 
 struct Writer<T> {
-    data: Rc<RefCell<VecDeque<T>>>,
+    data: Rc<RefCell<Vec<T>>>,
 }
 
 impl<T> Writer<T> {
     fn push(&self, t: T) {
-        (*self.data).borrow_mut().push_back(t)
+        (*self.data).borrow_mut().push(t)
+    }
+
+    fn extend<I>(&self, it: I)
+    where
+        I: IntoIterator<Item = T>,
+    {
+        (*self.data).borrow_mut().extend(it)
     }
 }
 
 #[derive(Debug, Clone)]
 struct MessageBuffer<T> {
-    data: Rc<RefCell<VecDeque<T>>>,
+    data: Rc<RefCell<Vec<T>>>,
 }
 
 impl<T> MessageBuffer<T> {
     fn new() -> (Self, RecvCtx<T>) {
-        let data = Rc::new(RefCell::new(VecDeque::new()));
+        let data = Rc::new(RefCell::new(Vec::new()));
         let d2 = data.clone();
         (MessageBuffer { data }, RecvCtx::new(d2))
     }
