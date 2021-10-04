@@ -4,7 +4,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::babyflow::{Dataflow, InputPort, OutputPort, RecvCtx, SendCtx};
+use crate::babyflow::{Dataflow, InputPort, RecvCtx, SendCtx};
 
 #[derive(Clone)]
 pub struct Operator<T>
@@ -12,7 +12,7 @@ where
     T: Clone,
 {
     df: Rc<RefCell<Dataflow>>,
-    output_port: OutputPort<T>,
+    output_port: SendCtx<T>,
 }
 
 impl<T> Operator<T>

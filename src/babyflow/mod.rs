@@ -44,8 +44,11 @@ where
 }
 
 pub struct Dataflow {
+    // TODO: transpose these.
     operators: Vec<Box<dyn FnMut()>>,
+    dirties: Vec<Vec<Rc<RefCell<bool>>>>,
     schedule: Rc<RefCell<Schedule<usize>>>,
+    adjacencies: Vec<Vec<usize>>,
 }
 
 pub struct RecvCtx<T> {
@@ -58,17 +61,20 @@ impl<T> RecvCtx<T> {
     }
 }
 
-pub struct SendCtx<O>
-where
-    O: Clone,
-{
-    output_port: OutputPort<O>,
-}
-
 impl<I> RecvCtx<I> {
     pub fn pull(&self) -> Option<I> {
         (*self.inputs).borrow_mut().pop_front()
     }
+}
+
+#[derive(Clone)]
+pub struct SendCtx<O>
+where
+    O: Clone,
+{
+    id: usize,
+    subscribers: Rc<RefCell<Vec<(usize, Writer<O>)>>>,
+    dirty: Rc<RefCell<bool>>,
 }
 
 impl<O> SendCtx<O>
@@ -76,10 +82,10 @@ where
     O: Clone,
 {
     pub fn push(&self, o: O) {
-        for (id, sub) in &*(*self.output_port.subscribers).borrow() {
-            self.output_port.schedule.borrow_mut().insert(*id);
+        for (_, sub) in &*(*self.subscribers).borrow() {
             sub.push(o.clone())
         }
+        *(*self.dirty).borrow_mut() = true;
     }
 }
 
@@ -118,27 +124,12 @@ impl<T> MessageBuffer<T> {
     }
 }
 
-#[derive(Clone)]
-pub struct OutputPort<T>
-where
-    T: Clone,
-{
-    schedule: Rc<RefCell<Schedule<usize>>>,
-    subscribers: Rc<RefCell<Vec<(usize, Writer<T>)>>>,
-}
-
-impl<T: Clone> OutputPort<T> {
-    fn send_ctx(&self) -> SendCtx<T> {
-        SendCtx {
-            output_port: self.clone(),
-        }
-    }
-}
-
 impl Dataflow {
     pub fn new() -> Self {
         Dataflow {
             operators: Vec::new(),
+            dirties: Vec::new(),
+            adjacencies: Vec::new(),
             schedule: Rc::new(RefCell::new(Schedule::new())),
         }
     }
@@ -151,15 +142,25 @@ impl Dataflow {
                 break;
             };
 
-            self.operators[id]()
+            self.operators[id]();
+
+            // If that operator sent out any data, its corresponding dirty bit will be true, so
+            // we can schedule all of its downstream operators.
+            if *(*self.dirties[id][0]).borrow() {
+                *(*self.dirties[id][0]).borrow_mut() = false;
+                for op in &self.adjacencies[id] {
+                    (*self.schedule).borrow_mut().insert(*op);
+                }
+            }
         }
     }
 
-    pub fn add_edge<T: Clone>(&mut self, o: OutputPort<T>, i: InputPort<T>) {
+    pub fn add_edge<T: Clone>(&mut self, o: SendCtx<T>, i: InputPort<T>) {
         (*o.subscribers).borrow_mut().push((i.id, i.data.writer()));
+        self.adjacencies[o.id].push(i.id);
     }
 
-    pub fn add_source<F: 'static, O: 'static>(&mut self, mut f: F) -> OutputPort<O>
+    pub fn add_source<F: 'static, O: 'static>(&mut self, mut f: F) -> SendCtx<O>
     where
         F: FnMut(&SendCtx<O>),
         O: Clone,
@@ -175,20 +176,21 @@ impl Dataflow {
         self.add_op(move |recv, _send: &SendCtx<()>| f(recv)).0
     }
 
-    fn make_output_port<T>(&mut self) -> OutputPort<T>
+    fn make_send_ctx<T>(&mut self, id: usize) -> SendCtx<T>
     where
         T: Clone,
     {
-        OutputPort {
-            schedule: self.schedule.clone(),
+        SendCtx {
+            id,
             subscribers: Rc::new(RefCell::new(Vec::new())),
+            dirty: Rc::new(RefCell::new(false)),
         }
     }
 
     pub fn add_op_2<F: 'static, I1: 'static, I2: 'static, O: 'static>(
         &mut self,
         mut f: F,
-    ) -> (InputPort<I1>, InputPort<I2>, OutputPort<O>)
+    ) -> (InputPort<I1>, InputPort<I2>, SendCtx<O>)
     where
         F: FnMut(&RecvCtx<I1>, &RecvCtx<I2>, &SendCtx<O>),
         O: Clone,
@@ -197,25 +199,26 @@ impl Dataflow {
         let (buf1, recv1) = MessageBuffer::new();
         let (buf2, recv2) = MessageBuffer::new();
 
-        let output_port = self.make_output_port();
-
-        let send = output_port.send_ctx();
-        let op = move || f(&recv1, &recv2, &send);
+        let send = self.make_send_ctx(id);
+        let s = send.clone();
+        let op = move || f(&recv1, &recv2, &s);
 
         self.operators.push(Box::new(op));
+        self.dirties.push(vec![send.dirty.clone()]);
+        self.adjacencies.push(Vec::new());
         (*self.schedule).borrow_mut().insert(id);
 
         (
             InputPort { id, data: buf1 },
             InputPort { id, data: buf2 },
-            output_port,
+            send,
         )
     }
 
     pub fn add_op<F: 'static, I: 'static, O: 'static>(
         &mut self,
         mut f: F,
-    ) -> (InputPort<I>, OutputPort<O>)
+    ) -> (InputPort<I>, SendCtx<O>)
     where
         F: FnMut(&RecvCtx<I>, &SendCtx<O>),
         O: Clone,
@@ -223,15 +226,16 @@ impl Dataflow {
         let id = self.operators.len();
         let (inputs, recv) = MessageBuffer::new();
 
-        let output_port = self.make_output_port();
-        let send = output_port.send_ctx();
-
-        let op = move || f(&recv, &send);
+        let send = self.make_send_ctx(id);
+        let s = send.clone();
+        let op = move || f(&recv, &s);
 
         self.operators.push(Box::new(op));
+        self.dirties.push(vec![send.dirty.clone()]);
+        self.adjacencies.push(Vec::new());
         (*self.schedule).borrow_mut().insert(id);
 
-        (InputPort { id, data: inputs }, output_port)
+        (InputPort { id, data: inputs }, send)
     }
 }
 
