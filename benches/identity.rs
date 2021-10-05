@@ -151,8 +151,70 @@ async fn benchmark_spinach(num_ints: usize) {
 
 fn criterion_spinach(c: &mut Criterion) {
     c.bench_function("spinach", |b| {
-        b.to_async(tokio::runtime::Runtime::new().unwrap())
-            .iter(|| benchmark_spinach(NUM_INTS));
+        b.to_async(
+            tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap(),
+        )
+        .iter(|| benchmark_spinach(NUM_INTS));
+    });
+}
+
+fn benchmark_spinach_chunks(num_ints: usize) -> impl std::future::Future {
+    use spinach::comp::Comp;
+
+    type MyLatRepr = spinach::lattice::set_union::SetUnionRepr<spinach::tag::VEC, usize>;
+
+    struct MyMorphism();
+    impl spinach::func::unary::Morphism for MyMorphism {
+        type InLatRepr = MyLatRepr;
+        type OutLatRepr = MyLatRepr;
+        fn call<Y: spinach::hide::Qualifier>(
+            &self,
+            item: spinach::hide::Hide<Y, Self::InLatRepr>,
+        ) -> spinach::hide::Hide<Y, Self::OutLatRepr> {
+            item.map(black_box)
+        }
+    }
+
+    let data: Vec<_> = (0..num_ints).collect();
+    let chunks: Vec<Vec<Vec<_>>> = data
+        .chunks(100 * 100)
+        .map(|chunk| chunk.iter().copied().collect())
+        .map(|chunk_vec: Vec<_>| {
+            chunk_vec
+                .chunks(100)
+                .map(|chunk| chunk.iter().copied().collect())
+                .collect()
+        })
+        .collect();
+
+    let local = tokio::task::LocalSet::new();
+
+    for chunk in chunks {
+        let op = <spinach::op::IterOp<MyLatRepr, _>>::new(chunk);
+
+        ///// MAGIC NUMBER!!!!!!!! is NUM_OPS
+        seq_macro::seq!(N in 0..20 {
+            let op = spinach::op::MorphismOp::new(op, MyMorphism());
+        });
+
+        let comp = spinach::comp::NullComp::new(op);
+        local.spawn_local(async move {
+            spinach::comp::CompExt::run(&comp).await.unwrap_err();
+        });
+    }
+    local
+}
+
+fn criterion_spinach_chunks(c: &mut Criterion) {
+    c.bench_function("spinach (size 10_000 chunks in 100 tasks)", |b| {
+        b.to_async(
+            tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap(),
+        )
+        .iter(|| benchmark_spinach_chunks(NUM_INTS));
     });
 }
 
@@ -178,6 +240,7 @@ criterion_group!(
     benchmark_timely,
     benchmark_babyflow,
     criterion_spinach,
+    criterion_spinach_chunks,
     benchmark_pipeline,
     benchmark_iter,
     benchmark_iter_collect,
