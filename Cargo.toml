@@ -16,5 +16,5 @@ seq-macro = "0.2"
 timely = "*"
 
 [[bench]]
-name = "identity"
+name = "fork_join"
 harness = false

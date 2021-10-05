@@ -48,13 +48,8 @@ where
     {
         let mut df = (*self.df).borrow_mut();
         let (input1, input2, output_port) = df.add_op_2(move |recv1, recv2, send| {
-            while let Some(v) = recv1.pull() {
-                send.push(v)
-            }
-
-            while let Some(v) = recv2.pull() {
-                send.push(v)
-            }
+            send.extend(recv1.take_all());
+            send.extend(recv2.take_all());
         });
         df.add_edge(self.output_port.clone(), input1);
         df.add_edge(rhs.output_port.clone(), input2);
@@ -72,11 +67,7 @@ where
     {
         let mut df = (*self.df).borrow_mut();
         let (input, output_port) = df.add_op(move |recv, send| {
-            while let Some(v) = recv.pull() {
-                if f(&v) {
-                    send.push(v)
-                }
-            }
+            send.extend(recv.take_all().drain(..).filter(|x| f(x)));
         });
         df.add_edge(self.output_port.clone(), input);
 

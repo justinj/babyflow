@@ -85,7 +85,7 @@ where
     O: Clone,
 {
     id: usize,
-    subscribers: Rc<RefCell<Vec<Writer<O>>>>,
+    subscribers: Rc<RefCell<Vec<Rc<RefCell<Vec<O>>>>>>,
     dirty: Rc<RefCell<bool>>,
 }
 
@@ -95,7 +95,7 @@ where
 {
     pub fn push(&self, o: O) {
         for sub in &*(*self.subscribers).borrow() {
-            sub.push(o.clone())
+            (*sub).borrow_mut().push(o.clone())
         }
         *(*self.dirty).borrow_mut() = true;
     }
@@ -105,15 +105,15 @@ where
         I: IntoIterator<Item = O>,
     {
         let subs = &*(*self.subscribers).borrow_mut();
-        // ? this `if` seems bad
-        if subs.len() == 1 {
-            subs[0].extend(it)
-        } else {
-            for o in it {
-                for sub in subs {
-                    sub.push(o.clone())
-                }
-            }
+        if subs.len() == 0 {
+            return;
+        }
+        let mut first = (*subs[0]).borrow_mut();
+        let l = (*first).len();
+        first.extend(it);
+        // Now copy that data from the first one over to the rest.
+        for sub in subs.iter().skip(1) {
+            (*sub).borrow_mut().extend_from_slice(&first[l..]);
         }
         *(*self.dirty).borrow_mut() = true;
     }
@@ -123,23 +123,6 @@ where
 pub struct InputPort<T> {
     id: usize,
     data: MessageBuffer<T>,
-}
-
-struct Writer<T> {
-    data: Rc<RefCell<Vec<T>>>,
-}
-
-impl<T> Writer<T> {
-    fn push(&self, t: T) {
-        (*self.data).borrow_mut().push(t)
-    }
-
-    fn extend<I>(&self, it: I)
-    where
-        I: IntoIterator<Item = T>,
-    {
-        (*self.data).borrow_mut().extend(it)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -152,12 +135,6 @@ impl<T> MessageBuffer<T> {
         let data = Rc::new(RefCell::new(Vec::new()));
         let d2 = data.clone();
         (MessageBuffer { data }, RecvCtx::new(d2))
-    }
-
-    fn writer(&self) -> Writer<T> {
-        Writer {
-            data: self.data.clone(),
-        }
     }
 }
 
@@ -193,7 +170,7 @@ impl Dataflow {
     }
 
     pub fn add_edge<T: Clone>(&mut self, o: SendCtx<T>, i: InputPort<T>) {
-        (*o.subscribers).borrow_mut().push(i.data.writer());
+        (*o.subscribers).borrow_mut().push(i.data.data.clone());
         self.adjacencies[o.id].push(i.id);
     }
 
