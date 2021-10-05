@@ -2,6 +2,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use datalog::babyflow::{Operator, Query};
+use pprof::criterion::{Output, PProfProfiler};
 use std::sync::mpsc::channel;
 use std::thread::{self, sleep};
 use std::time::Duration;
@@ -10,8 +11,6 @@ use timely::dataflow::operators::{Concat, Filter, Inspect, Map, ToStream};
 const NUM_OPS: usize = 20;
 const NUM_INTS: usize = 1_000_000;
 
-// This benchmark runs babyflow which more-or-less just copies the data directly
-// between the operators, but with some extra overhead.
 fn benchmark_babyflow(c: &mut Criterion) {
     c.bench_function("babyflow", |b| {
         b.iter(|| {
@@ -57,13 +56,11 @@ fn benchmark_timely(c: &mut Criterion) {
     });
 }
 
-criterion_group!(
-    fork_join_dataflow,
-    benchmark_babyflow,
-    benchmark_timely,
-    // benchmark_pipeline,
-    // benchmark_iter,
-    // benchmark_iter_collect,
-    // benchmark_raw_copy,
-);
+// criterion_group!(
+//     name = fork_join_dataflow;
+//     config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+//     targets = benchmark_babyflow
+// );
+// criterion_group!(fork_join_dataflow, benchmark_timely,);
+criterion_group!(fork_join_dataflow, benchmark_babyflow, benchmark_timely);
 criterion_main!(fork_join_dataflow);

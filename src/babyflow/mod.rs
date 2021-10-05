@@ -71,14 +71,6 @@ impl<I> RecvCtx<I> {
     }
 }
 
-// impl<T> Iterator for RecvCtx<T> {
-//     type Item = T;
-
-//     fn next(&mut self) -> Option<T> {
-//         (*self.inputs).borrow_mut().pop_front()
-//     }
-// }
-
 #[derive(Clone)]
 pub struct SendCtx<O>
 where
@@ -100,7 +92,22 @@ where
         *(*self.dirty).borrow_mut() = true;
     }
 
-    pub fn extend<I>(&self, it: I)
+    pub fn give_vec(&self, v: &mut Vec<O>) {
+        let subs = &*(*self.subscribers).borrow_mut();
+        for i in 0..(subs.len() - 1) {
+            (*subs[i]).borrow_mut().extend_from_slice(&v);
+        }
+        if subs.len() > 0 {
+            if (*subs[subs.len() - 1]).borrow().len() == 0 {
+                (*subs[subs.len() - 1]).replace(std::mem::replace(v, Vec::new()));
+            } else {
+                (*subs[subs.len() - 1]).borrow_mut().extend(v.drain(..));
+            }
+        }
+        *(*self.dirty).borrow_mut() = true;
+    }
+
+    pub fn give_iterator<I>(&self, v: I)
     where
         I: IntoIterator<Item = O>,
     {
@@ -110,7 +117,7 @@ where
         }
         let mut first = (*subs[0]).borrow_mut();
         let l = (*first).len();
-        first.extend(it);
+        first.extend(v);
         // Now copy that data from the first one over to the rest.
         for sub in subs.iter().skip(1) {
             (*sub).borrow_mut().extend_from_slice(&first[l..]);
