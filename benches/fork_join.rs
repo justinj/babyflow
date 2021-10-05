@@ -56,11 +56,113 @@ fn benchmark_timely(c: &mut Criterion) {
     });
 }
 
+fn benchmark_spinach(c: &mut Criterion) {
+    c.bench_function("spinach", |b| {
+        b.to_async(
+            tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap(),
+        )
+        .iter(|| {
+            async {
+                use spinach::comp::Comp;
+
+                type MyLatRepr = spinach::lattice::set_union::SetUnionRepr<spinach::tag::VEC, usize>;
+                let op = <spinach::op::OnceOp<MyLatRepr>>::new((0..NUM_INTS).collect());
+
+                struct Even();
+                impl spinach::func::unary::Morphism for Even {
+                    type InLatRepr = MyLatRepr;
+                    type OutLatRepr = MyLatRepr;
+                    fn call<Y: spinach::hide::Qualifier>(
+                        &self,
+                        item: spinach::hide::Hide<Y, Self::InLatRepr>,
+                    ) -> spinach::hide::Hide<Y, Self::OutLatRepr> {
+                        item.filter(|i| 0 == i % 2)
+                    }
+                }
+
+                struct Odds();
+                impl spinach::func::unary::Morphism for Odds {
+                    type InLatRepr = MyLatRepr;
+                    type OutLatRepr = MyLatRepr;
+                    fn call<Y: spinach::hide::Qualifier>(
+                        &self,
+                        item: spinach::hide::Hide<Y, Self::InLatRepr>,
+                    ) -> spinach::hide::Hide<Y, Self::OutLatRepr> {
+                        item.filter(|i| 1 == i % 2)
+                    }
+                }
+
+                ///// MAGIC NUMBER!!!!!!!! is NUM_OPS
+                seq_macro::seq!(N in 0..20 {
+                    let [ op_even, op_odds ] = spinach::op::fixed_split::<_, 2>(op);
+                    let op_even = spinach::op::MorphismOp::new(op_even, Even());
+                    let op_odds = spinach::op::MorphismOp::new(op_odds, Odds());
+                    let op = spinach::op::MergeOp::new(op_even, op_odds);
+                    let op = spinach::op::DynOpDelta::new(Box::new(op));
+                });
+
+                let comp = spinach::comp::NullComp::new(op);
+                spinach::comp::CompExt::run(&comp).await.unwrap_err();
+            }
+        });
+    });
+}
+
+fn benchmark_spinach_switch(c: &mut Criterion) {
+    c.bench_function("spinach w/ switch", |b| {
+        b.to_async(
+            tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap(),
+        )
+        .iter(|| {
+            async {
+                use spinach::comp::Comp;
+
+                type MyLatRepr = spinach::lattice::set_union::SetUnionRepr<spinach::tag::VEC, usize>;
+                let op = <spinach::op::OnceOp<MyLatRepr>>::new((0..NUM_INTS).collect());
+
+                struct SwitchEvenOdd();
+                impl spinach::func::unary::Morphism for SwitchEvenOdd {
+                    type InLatRepr = MyLatRepr;
+                    type OutLatRepr = spinach::lattice::pair::PairRepr<MyLatRepr, MyLatRepr>;
+                    fn call<Y: spinach::hide::Qualifier>(
+                        &self,
+                        item: spinach::hide::Hide<Y, Self::InLatRepr>,
+                    ) -> spinach::hide::Hide<Y, Self::OutLatRepr> {
+                        let ( a, b ) = item.switch(|i| 0 == i % 2);
+                        spinach::hide::Hide::zip(a, b)
+                    }
+                }
+
+                ///// MAGIC NUMBER!!!!!!!! is NUM_OPS
+                seq_macro::seq!(N in 0..20 {
+                    let op = spinach::op::MorphismOp::new(op, SwitchEvenOdd());
+                    let ( op_even, op_odds ) = spinach::op::SwitchOp::new(op);
+                    let op = spinach::op::MergeOp::new(op_even, op_odds);
+                    let op = spinach::op::DynOpDelta::new(Box::new(op));
+                });
+
+                let comp = spinach::comp::NullComp::new(op);
+                spinach::comp::CompExt::run(&comp).await.unwrap_err();
+            }
+        });
+    });
+}
+
 // criterion_group!(
 //     name = fork_join_dataflow;
 //     config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
 //     targets = benchmark_babyflow
 // );
 // criterion_group!(fork_join_dataflow, benchmark_timely,);
-criterion_group!(fork_join_dataflow, benchmark_babyflow, benchmark_timely);
+criterion_group!(
+    fork_join_dataflow,
+    benchmark_babyflow,
+    benchmark_timely,
+    benchmark_spinach,
+    benchmark_spinach_switch,
+);
 criterion_main!(fork_join_dataflow);
