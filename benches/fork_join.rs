@@ -10,7 +10,7 @@ use timely::dataflow::operators::{Concat, Concatenate, Filter, Inspect, Map, ToS
 
 const NUM_OPS: usize = 20;
 const NUM_INTS: usize = 1_000_000;
-const BRANCH_FACTOR: usize = 5;
+const BRANCH_FACTOR: usize = 2;
 
 fn benchmark_babyflow(c: &mut Criterion) {
     c.bench_function("babyflow", |b| {
@@ -18,22 +18,13 @@ fn benchmark_babyflow(c: &mut Criterion) {
             let mut q = Query::new();
 
             let mut op = q.source(move |send| {
-                for i in 0..NUM_INTS {
-                    send.push(i);
-                }
+                send.give_iterator(0..NUM_INTS);
             });
 
             for _ in 0..NUM_OPS {
-                let mut ops = Vec::new();
-
-                for i in 0..BRANCH_FACTOR {
-                    ops.push(op.clone().filter(move |x| x % BRANCH_FACTOR == i))
-                }
-
-                op = ops[0].clone();
-                for i in 1..BRANCH_FACTOR {
-                    op = op.union(ops[i].clone());
-                }
+                op = q.concat(
+                    (0..BRANCH_FACTOR).map(|i| op.clone().filter(move |x| x % BRANCH_FACTOR == i)),
+                );
             }
 
             op.sink(|i| {

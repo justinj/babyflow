@@ -182,6 +182,18 @@ impl Query {
         (*self.df).borrow_mut().add_edge(o.output_port, p)
     }
 
+    pub fn concat<T, I>(&mut self, ops: I) -> Operator<T>
+    where
+        T: Clone + 'static,
+        I: IntoIterator<Item = Operator<T>>,
+    {
+        let (p, out) = self.merge();
+        for o in ops {
+            self.wire(o, p.clone())
+        }
+        out
+    }
+
     pub fn source<T, F>(&mut self, f: F) -> Operator<T>
     where
         T: Clone + 'static,
@@ -199,11 +211,7 @@ impl Query {
         T: Clone + 'static,
     {
         let mut df = (*self.df).borrow_mut();
-        let (input, output_port) = df.add_op(move |recv, send| {
-            while let Some(v) = recv.pull() {
-                send.push(v)
-            }
-        });
+        let (input, output_port) = df.add_op(move |recv, send| send.give_vec(&mut recv.take_all()));
 
         (
             input,
