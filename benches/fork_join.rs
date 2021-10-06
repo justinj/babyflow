@@ -6,10 +6,11 @@ use pprof::criterion::{Output, PProfProfiler};
 use std::sync::mpsc::channel;
 use std::thread::{self, sleep};
 use std::time::Duration;
-use timely::dataflow::operators::{Concat, Filter, Inspect, Map, ToStream};
+use timely::dataflow::operators::{Concat, Concatenate, Filter, Inspect, Map, ToStream};
 
 const NUM_OPS: usize = 20;
 const NUM_INTS: usize = 1_000_000;
+const BRANCH_FACTOR: usize = 5;
 
 fn benchmark_babyflow(c: &mut Criterion) {
     c.bench_function("babyflow", |b| {
@@ -23,9 +24,16 @@ fn benchmark_babyflow(c: &mut Criterion) {
             });
 
             for _ in 0..NUM_OPS {
-                let op1 = op.clone().filter(|x| x % 2 == 0);
-                let op2 = op.filter(|x| x % 2 == 1);
-                op = op1.union(op2)
+                let mut ops = Vec::new();
+
+                for i in 0..BRANCH_FACTOR {
+                    ops.push(op.clone().filter(move |x| x % BRANCH_FACTOR == i))
+                }
+
+                op = ops[0].clone();
+                for i in 1..BRANCH_FACTOR {
+                    op = op.union(ops[i].clone());
+                }
             }
 
             op.sink(|i| {
@@ -43,9 +51,13 @@ fn benchmark_timely(c: &mut Criterion) {
             timely::example(|scope| {
                 let mut op = (0..NUM_INTS).to_stream(scope);
                 for _ in 0..NUM_OPS {
-                    let op1 = op.filter(|i| i % 2 == 0);
-                    let op2 = op.filter(|i| i % 2 == 1);
-                    op = op1.concat(&op2);
+                    let mut ops = Vec::new();
+
+                    for i in 0..BRANCH_FACTOR {
+                        ops.push(op.filter(move |x| x % BRANCH_FACTOR == i))
+                    }
+
+                    op = scope.concatenate(ops);
                 }
 
                 op.inspect(|i| {
@@ -67,7 +79,8 @@ fn benchmark_spinach(c: &mut Criterion) {
             async {
                 use spinach::comp::Comp;
 
-                type MyLatRepr = spinach::lattice::set_union::SetUnionRepr<spinach::tag::VEC, usize>;
+                type MyLatRepr =
+                    spinach::lattice::set_union::SetUnionRepr<spinach::tag::VEC, usize>;
                 let op = <spinach::op::OnceOp<MyLatRepr>>::new((0..NUM_INTS).collect());
 
                 struct Even();
@@ -121,7 +134,8 @@ fn benchmark_spinach_switch(c: &mut Criterion) {
             async {
                 use spinach::comp::Comp;
 
-                type MyLatRepr = spinach::lattice::set_union::SetUnionRepr<spinach::tag::VEC, usize>;
+                type MyLatRepr =
+                    spinach::lattice::set_union::SetUnionRepr<spinach::tag::VEC, usize>;
                 let op = <spinach::op::OnceOp<MyLatRepr>>::new((0..NUM_INTS).collect());
 
                 struct SwitchEvenOdd();
@@ -132,7 +146,7 @@ fn benchmark_spinach_switch(c: &mut Criterion) {
                         &self,
                         item: spinach::hide::Hide<Y, Self::InLatRepr>,
                     ) -> spinach::hide::Hide<Y, Self::OutLatRepr> {
-                        let ( a, b ) = item.switch(|i| 0 == i % 2);
+                        let (a, b) = item.switch(|i| 0 == i % 2);
                         spinach::hide::Hide::zip(a, b)
                     }
                 }
